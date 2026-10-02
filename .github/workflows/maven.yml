@@ -39,9 +39,42 @@ jobs:
       - name: Build and verify
         run: xvfb-run --auto-servernum mvn install
 
+      - name: Add coverage summary to Allure environment
+        if: always()
+        run: |
+          JACOCO_XML=target/site/jacoco/jacoco.xml
+          if [ ! -f "$JACOCO_XML" ]; then
+            echo "No JaCoCo report found at $JACOCO_XML, skipping"
+            exit 0
+          fi
+          mkdir -p target/allure-results
+
+          pct() {
+            local missed=$1 covered=$2
+            local total=$((missed + covered))
+            if [ "$total" -eq 0 ]; then echo "n/a"; else awk -v c="$covered" -v t="$total" 'BEGIN { printf "%.1f%%", (c/t)*100 }'; fi
+          }
+
+          read -r INSTR_MISSED INSTR_COVERED <<< "$(grep -oE '<counter type="INSTRUCTION" missed="[0-9]+" covered="[0-9]+"/>' "$JACOCO_XML" | tail -1 | grep -oE '[0-9]+' | tr '\n' ' ')"
+          read -r LINE_MISSED LINE_COVERED <<< "$(grep -oE '<counter type="LINE" missed="[0-9]+" covered="[0-9]+"/>' "$JACOCO_XML" | tail -1 | grep -oE '[0-9]+' | tr '\n' ' ')"
+          read -r METHOD_MISSED METHOD_COVERED <<< "$(grep -oE '<counter type="METHOD" missed="[0-9]+" covered="[0-9]+"/>' "$JACOCO_XML" | tail -1 | grep -oE '[0-9]+' | tr '\n' ' ')"
+
+          {
+            echo "LineCoverage=$(pct "$LINE_MISSED" "$LINE_COVERED") ($LINE_COVERED/$((LINE_MISSED + LINE_COVERED)) lines)"
+            echo "InstructionCoverage=$(pct "$INSTR_MISSED" "$INSTR_COVERED")"
+            echo "MethodCoverage=$(pct "$METHOD_MISSED" "$METHOD_COVERED") ($METHOD_COVERED/$((METHOD_MISSED + METHOD_COVERED)) methods)"
+          } >> target/allure-results/environment.properties
+
       - name: Generate Allure report
         if: always()
         run: mvn --batch-mode --no-transfer-progress io.qameta.allure:allure-maven:2.15.0:report
+
+      - name: Add JaCoCo HTML report to the published site
+        if: always()
+        run: |
+          if [ -d target/site/jacoco ]; then
+            cp -r target/site/jacoco target/site/allure-maven-plugin/jacoco
+          fi
 
       - name: Upload Allure report (zip artifact)
         id: upload-allure-report
@@ -71,4 +104,6 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Add report link to job summary
-        run: echo "[View the Allure report](${{ steps.deployment.outputs.page_url }})" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "[View the Allure report](${{ steps.deployment.outputs.page_url }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "[View the full JaCoCo coverage report](${{ steps.deployment.outputs.page_url }}jacoco/index.html)" >> "$GITHUB_STEP_SUMMARY"
