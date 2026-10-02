@@ -22,8 +22,37 @@ jobs:
           java-version: '25'
           cache: maven
 
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: 3.9.9
+
       - name: Install Xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Build and verify
         run: xvfb-run --auto-servernum mvn install
+
+      - name: Generate Allure report
+        if: always()
+        run: mvn --batch-mode --no-transfer-progress io.qameta.allure:allure-maven:2.15.0:report
+
+      - name: Upload Allure report
+        id: upload-allure-report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: target/site/allure-maven-plugin/
+          if-no-files-found: warn
+
+      - name: Add report link to job summary
+        if: always()
+        env:
+          ALLURE_REPORT_URL: ${{ steps.upload-allure-report.outputs.artifact-url }}
+        run: |
+          if [ -n "$ALLURE_REPORT_URL" ]; then
+            echo "[Download the Allure report]($ALLURE_REPORT_URL)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Allure report artifact was not created." >> "$GITHUB_STEP_SUMMARY"
+          fi
