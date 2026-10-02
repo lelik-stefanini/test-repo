@@ -16,7 +16,11 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -34,13 +38,28 @@ jobs:
           maven-version: 3.9.9
 
       - name: Install Xvfb
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Build and verify
-        run: xvfb-run --auto-servernum mvn install
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run --auto-servernum mvn install
+          else
+            mvn install
+          fi
+
+      - name: Upload native application (jlink runtime image)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hellofx-${{ runner.os }}
+          path: target/image/
+          if-no-files-found: warn
 
       - name: Add coverage summary to Allure environment
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         run: |
           JACOCO_XML=target/site/jacoco/jacoco.xml
           if [ ! -f "$JACOCO_XML" ]; then
@@ -66,11 +85,11 @@ jobs:
           } >> target/allure-results/environment.properties
 
       - name: Generate Allure report
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         run: mvn --batch-mode --no-transfer-progress io.qameta.allure:allure-maven:2.15.0:report
 
       - name: Add JaCoCo HTML report to the published site
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         run: |
           if [ -d target/site/jacoco ]; then
             cp -r target/site/jacoco target/site/allure-maven-plugin/jacoco
@@ -78,7 +97,7 @@ jobs:
 
       - name: Upload Allure report (zip artifact)
         id: upload-allure-report
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: allure-report
@@ -86,7 +105,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Pages artifact
-        if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: always() && matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/upload-pages-artifact@v3
         with:
           path: target/site/allure-maven-plugin/
